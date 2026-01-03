@@ -3788,8 +3788,450 @@ async def add_chat_to_folder(
 
 
 # ============================================================================
-# 主入口
+# AI润色 Prompts
 # ============================================================================
+
+@mcp.prompt()
+def polish_message(message: str, style: str = "友好") -> str:
+    """消息润色提示词
+    
+    Args:
+        message: 要润色的原始消息
+        style: 润色风格（友好/正式/幽默/简洁）
+    
+    Returns:
+        AI润色提示词
+    """
+    return f"""请帮我润色以下消息，使其更加{style}和自然，保持原意但让表达更好：
+
+原始消息：
+{message}
+
+要求：
+1. 保持消息的核心意思不变
+2. 使语言更加{style}
+3. 修正语法错误（如有）
+4. 只输出润色后的消息，不要加任何解释"""
+
+
+@mcp.prompt()
+def expand_message(message: str, context: str = "") -> str:
+    """消息扩写提示词
+    
+    Args:
+        message: 要扩写的简短消息
+        context: 上下文信息（可选）
+    
+    Returns:
+        AI扩写提示词
+    """
+    context_hint = f"\n上下文：{context}" if context else ""
+    return f"""请帮我扩写以下简短消息，使其更加完整和有说服力：
+
+原始消息：
+{message}{context_hint}
+
+要求：
+1. 保持消息的核心意思不变
+2. 添加适当的细节和解释
+3. 语气自然友好
+4. 只输出扩写后的消息，不要加任何解释"""
+
+
+# ============================================================================
+# 定时任务管理工具
+# ============================================================================
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="创建定时任务",
+        destructiveHint=True,
+    )
+)
+async def create_schedule(
+    message: str,
+    targets: List[str],
+    hour: int,
+    minute: int,
+    name: str = None,
+    action: str = "send_message",
+    repeat: str = "once",
+    year: int = None,
+    month: int = None,
+    day: int = None,
+    second: int = 0,
+    interval: int = 2000
+) -> str:
+    """创建定时发送任务
+    
+    Args:
+        message: 要发送的消息内容
+        targets: 发送目标列表（用户ID或用户名，如 ["123456", "username"]）
+        hour: 执行小时（0-23）
+        minute: 执行分钟（0-59）
+        name: 任务名称（可选，自动生成）
+        action: 执行类型 - "send_message"(直接发送) 或 "ai_execute"(AI润色后发送)
+        repeat: 重复模式 - "once"(仅一次) / "daily"(每天) / "weekly"(每周) / "workday"(工作日)
+        year: 执行年份（可选，默认今年）
+        month: 执行月份（可选，默认当月）
+        day: 执行日期（可选，默认今天）
+        second: 执行秒数（可选，默认0）
+        interval: 多目标发送间隔毫秒（默认2000）
+    
+    Returns:
+        创建结果
+    """
+    try:
+        from scheduler import task_scheduler
+        import uuid
+        
+        now = datetime.now()
+        schedule_id = f"sched_{uuid.uuid4().hex[:12]}"
+        
+        # 解析目标
+        friend_ids = []
+        stranger_usernames = []
+        for t in targets:
+            if str(t).isdigit():
+                friend_ids.append(int(t))
+            else:
+                stranger_usernames.append(str(t).lstrip("@"))
+        
+        # 获取当前账号
+        accounts = list(account_manager.accounts.keys())
+        if not accounts:
+            return "❌ 没有可用账号"
+        
+        execute_time = {
+            "year": year or now.year,
+            "month": month or now.month,
+            "day": day or now.day,
+            "hour": hour,
+            "minute": minute,
+            "second": second
+        }
+        
+        task_name = name or f"定时任务_{hour:02d}:{minute:02d}"
+        
+        # 生成cron表达式（兼容旧格式）
+        cron = f"{minute} {hour} {execute_time['day']} {execute_time['month']} *"
+        
+        success = task_scheduler.add_schedule(
+            schedule_id=schedule_id,
+            name=task_name,
+            cron=cron,
+            action=action,
+            target="custom",
+            message=message,
+            account_ids=accounts[:1],
+            enabled=True,
+            execute_time=execute_time,
+            repeat=repeat,
+            friend_ids=friend_ids,
+            stranger_usernames=stranger_usernames,
+            interval=interval
+        )
+        
+        if success:
+            target_desc = f"{len(friend_ids)}个好友" if friend_ids else ""
+            if stranger_usernames:
+                target_desc += f"{'、' if target_desc else ''}{len(stranger_usernames)}个用户名"
+            
+            action_desc = "直接发送" if action == "send_message" else "AI润色后发送"
+            repeat_desc = {"once": "仅一次", "daily": "每天", "weekly": "每周", "workday": "工作日"}.get(repeat, repeat)
+            
+            return f"""✅ 定时任务创建成功
+
+📋 任务ID: {schedule_id}
+📝 名称: {task_name}
+⏰ 执行时间: {execute_time['year']}-{execute_time['month']:02d}-{execute_time['day']:02d} {hour:02d}:{minute:02d}:{second:02d}
+🔄 重复: {repeat_desc}
+📤 类型: {action_desc}
+🎯 目标: {target_desc}
+💬 消息: {message[:50]}{'...' if len(message) > 50 else ''}"""
+        else:
+            return "❌ 创建定时任务失败"
+            
+    except Exception as e:
+        return log_and_format_error("create_schedule", e)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="查看定时任务列表",
+        readOnlyHint=True,
+    )
+)
+async def list_schedules() -> str:
+    """查看所有定时任务
+    
+    Returns:
+        任务列表
+    """
+    try:
+        from scheduler import task_scheduler
+        
+        schedules = task_scheduler.list_schedules()
+        if not schedules:
+            return "📭 没有定时任务"
+        
+        result = f"📅 定时任务列表 ({len(schedules)}个)\n" + "="*40 + "\n\n"
+        
+        for s in schedules:
+            status = "✅" if s.get("enabled") else "⏸️"
+            action = "AI润色" if s.get("action") == "ai_execute" else "直接发送"
+            repeat = {"once": "一次", "daily": "每天", "weekly": "每周", "workday": "工作日"}.get(s.get("repeat", "once"), "一次")
+            
+            exec_time = s.get("execute_time", {})
+            time_str = f"{exec_time.get('hour', 0):02d}:{exec_time.get('minute', 0):02d}" if exec_time else "未设置"
+            
+            targets_count = len(s.get("friend_ids", [])) + len(s.get("stranger_usernames", []))
+            
+            result += f"""{status} {s.get('name', '未命名')}
+   ID: {s.get('id')}
+   时间: {time_str} | 重复: {repeat} | 类型: {action}
+   目标: {targets_count}个 | 已执行: {s.get('run_count', 0)}次
+   消息: {(s.get('message') or '')[:30]}{'...' if len(s.get('message') or '') > 30 else ''}
+
+"""
+        
+        return result
+        
+    except Exception as e:
+        return log_and_format_error("list_schedules", e)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="删除定时任务",
+        destructiveHint=True,
+    )
+)
+async def delete_schedule(schedule_id: str) -> str:
+    """删除定时任务
+    
+    Args:
+        schedule_id: 任务ID
+    
+    Returns:
+        删除结果
+    """
+    try:
+        from scheduler import task_scheduler
+        
+        if schedule_id not in task_scheduler.schedules:
+            return f"❌ 任务不存在: {schedule_id}"
+        
+        name = task_scheduler.schedules[schedule_id].get("name", "未命名")
+        success = task_scheduler.delete_schedule(schedule_id)
+        
+        if success:
+            return f"✅ 已删除定时任务: {name}"
+        else:
+            return f"❌ 删除失败: {schedule_id}"
+            
+    except Exception as e:
+        return log_and_format_error("delete_schedule", e)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="启用/禁用定时任务",
+    )
+)
+async def toggle_schedule(schedule_id: str, enabled: bool) -> str:
+    """启用或禁用定时任务
+    
+    Args:
+        schedule_id: 任务ID
+        enabled: True启用，False禁用
+    
+    Returns:
+        操作结果
+    """
+    try:
+        from scheduler import task_scheduler
+        
+        if schedule_id not in task_scheduler.schedules:
+            return f"❌ 任务不存在: {schedule_id}"
+        
+        task_scheduler.schedules[schedule_id]["enabled"] = enabled
+        task_scheduler._save_schedules()
+        
+        name = task_scheduler.schedules[schedule_id].get("name", "未命名")
+        status = "启用" if enabled else "禁用"
+        
+        return f"✅ 已{status}定时任务: {name}"
+            
+    except Exception as e:
+        return log_and_format_error("toggle_schedule", e)
+
+
+# ============================================================================
+# 定时任务AI执行工具
+# ============================================================================
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="获取待AI润色的定时任务",
+        readOnlyHint=True,
+    )
+)
+async def get_pending_ai_tasks() -> str:
+    """获取所有待AI润色执行的定时任务
+    
+    Returns:
+        待执行任务列表（JSON格式）
+    """
+    try:
+        from scheduler import task_scheduler
+        import json
+        
+        pending_tasks = []
+        now = datetime.now()
+        
+        for schedule_id, schedule in task_scheduler.schedules.items():
+            if not schedule.get("enabled", True):
+                continue
+            if schedule.get("action") != "ai_execute":
+                continue
+            
+            # 检查是否该执行
+            execute_time = schedule.get("execute_time")
+            if not execute_time:
+                continue
+                
+            target_time = datetime(
+                execute_time.get("year", now.year),
+                execute_time.get("month", now.month),
+                execute_time.get("day", now.day),
+                execute_time.get("hour", 0),
+                execute_time.get("minute", 0),
+                execute_time.get("second", 0)
+            )
+            
+            time_diff = (now - target_time).total_seconds()
+            last_run = schedule.get("last_run")
+            
+            # 已到执行时间且未执行
+            if time_diff >= 0 and not last_run:
+                pending_tasks.append({
+                    "task_id": schedule_id,
+                    "name": schedule.get("name"),
+                    "message": schedule.get("message"),
+                    "friend_ids": schedule.get("friend_ids", []),
+                    "stranger_usernames": schedule.get("stranger_usernames", []),
+                    "account_id": (schedule.get("accounts") or schedule.get("account_ids") or [""])[0],
+                    "interval": schedule.get("interval", 2000),
+                    "execute_time": execute_time
+                })
+        
+        if not pending_tasks:
+            return "📭 没有待AI润色执行的定时任务"
+        
+        return json.dumps({
+            "count": len(pending_tasks),
+            "tasks": pending_tasks
+        }, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        return log_and_format_error("get_pending_ai_tasks", e)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="执行AI润色定时任务",
+        destructiveHint=True,
+    )
+)
+async def execute_ai_task(
+    task_id: str,
+    polished_message: str
+) -> str:
+    """执行AI润色后的定时任务
+    
+    Args:
+        task_id: 任务ID（从get_pending_ai_tasks获取）
+        polished_message: AI润色后的消息内容
+    
+    Returns:
+        执行结果
+    """
+    try:
+        from scheduler import task_scheduler
+        import asyncio
+        
+        schedule = task_scheduler.schedules.get(task_id)
+        if not schedule:
+            return f"❌ 任务不存在: {task_id}"
+        
+        # 获取发送目标
+        friend_ids = schedule.get("friend_ids", [])
+        stranger_usernames = schedule.get("stranger_usernames", [])
+        interval = schedule.get("interval", 2000)
+        accounts = schedule.get("accounts") or schedule.get("account_ids")
+        account_id = accounts[0] if accounts else None
+        
+        if not account_id:
+            return "❌ 没有可用账号"
+        
+        # 获取客户端
+        client = await account_manager.get_client(account_id)
+        if not client:
+            return f"❌ 获取账号 {account_id} 客户端失败"
+        
+        # 合并发送目标
+        targets = []
+        for fid in friend_ids:
+            targets.append({"type": "id", "value": fid})
+        for username in stranger_usernames:
+            targets.append({"type": "username", "value": username})
+        
+        if not targets:
+            targets = [{"type": "id", "value": "me"}]
+        
+        success_count = 0
+        fail_count = 0
+        results = []
+        
+        for i, target in enumerate(targets):
+            try:
+                target_value = target["value"]
+                entity = await client.get_entity(target_value)
+                await client.send_message(entity, polished_message)
+                success_count += 1
+                results.append(f"✅ {target_value}")
+                
+                if i < len(targets) - 1:
+                    await asyncio.sleep(interval / 1000)
+                    
+            except Exception as e:
+                fail_count += 1
+                results.append(f"❌ {target_value}: {str(e)}")
+        
+        # 更新任务状态
+        now_iso = datetime.now().isoformat()
+        schedule["last_run"] = now_iso
+        schedule["lastRun"] = now_iso
+        schedule["run_count"] = schedule.get("run_count", 0) + 1
+        if fail_count > 0:
+            schedule["fail_count"] = schedule.get("fail_count", 0) + 1
+        task_scheduler._save_schedules()
+        
+        return f"""✅ AI润色任务执行完成
+
+任务: {schedule.get('name')}
+润色后消息: {polished_message[:100]}{'...' if len(polished_message) > 100 else ''}
+
+发送结果:
+- 成功: {success_count}
+- 失败: {fail_count}
+
+详情:
+""" + "\n".join(results)
+        
+    except Exception as e:
+        return log_and_format_error("execute_ai_task", e)
 
 
 # ============================================================================

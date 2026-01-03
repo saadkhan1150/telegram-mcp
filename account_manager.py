@@ -798,6 +798,115 @@ class AccountManager:
 
     # ==================== 批量导入 ====================
 
+    async def get_friends(self, account_id: str) -> List[Dict]:
+        """
+        获取账号的好友/联系人列表
+
+        Args:
+            account_id: 账号ID
+
+        Returns:
+            好友列表 [{"id": ..., "name": ..., "username": ...}, ...]
+        """
+        if account_id not in self.accounts:
+            raise ValueError(f"账号 {account_id} 不存在")
+
+        account = self.accounts[account_id]
+        session_string = account.get("session_string")
+
+        if not session_string:
+            raise ValueError("账号没有有效的Session")
+
+        client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
+        friends = []
+
+        try:
+            await client.connect()
+
+            if not await client.is_user_authorized():
+                raise ValueError("Session已失效")
+
+            # 获取所有对话
+            dialogs = await client.get_dialogs()
+
+            for dialog in dialogs:
+                entity = dialog.entity
+                # 只获取用户（好友），排除群组和频道
+                if hasattr(entity, 'first_name'):
+                    name_parts = []
+                    if entity.first_name:
+                        name_parts.append(entity.first_name)
+                    if hasattr(entity, 'last_name') and entity.last_name:
+                        name_parts.append(entity.last_name)
+
+                    friends.append({
+                        "id": entity.id,
+                        "name": " ".join(name_parts) if name_parts else str(entity.id),
+                        "username": entity.username or None,
+                        "phone": getattr(entity, 'phone', None)
+                    })
+
+        finally:
+            await client.disconnect()
+
+        return friends
+
+    async def validate_usernames(self, account_id: str, usernames: List[str]) -> Dict:
+        """
+        验证用户名是否有效
+
+        Args:
+            account_id: 账号ID
+            usernames: 用户名列表
+
+        Returns:
+            {"valid": [有效用户名], "invalid": [无效用户名]}
+        """
+        if account_id not in self.accounts:
+            raise ValueError(f"账号 {account_id} 不存在")
+
+        account = self.accounts[account_id]
+        session_string = account.get("session_string")
+
+        if not session_string:
+            raise ValueError("账号没有有效的Session")
+
+        client = TelegramClient(StringSession(session_string), API_ID, API_HASH)
+        valid = []
+        invalid = []
+
+        try:
+            await client.connect()
+
+            if not await client.is_user_authorized():
+                raise ValueError("Session已失效")
+
+            for username in usernames:
+                try:
+                    # 尝试获取用户实体
+                    entity = await client.get_entity(username)
+                    if entity:
+                        valid.append({
+                            "username": username,
+                            "id": entity.id,
+                            "name": getattr(entity, 'first_name', '') or username
+                        })
+                except Exception:
+                    invalid.append(username)
+
+                # 避免请求太频繁
+                await asyncio.sleep(0.3)
+
+        finally:
+            await client.disconnect()
+
+        return {
+            "valid": valid,
+            "invalid": invalid,
+            "valid_count": len(valid),
+            "invalid_count": len(invalid)
+        }
+
     async def batch_import(self, accounts_data: List[Dict]) -> Dict:
         """
         批量导入账号

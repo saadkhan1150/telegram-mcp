@@ -241,6 +241,39 @@ async def batch_import(request: BatchImportRequest):
     return result
 
 
+@app.get("/api/accounts/{account_id}/friends")
+async def get_account_friends(account_id: str):
+    """获取账号的好友列表"""
+    try:
+        friends = await account_manager.get_friends(account_id)
+        return {
+            "success": True,
+            "friends": friends,
+            "total": len(friends)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/accounts/validate-usernames")
+async def validate_usernames(request: dict):
+    """验证用户名是否有效"""
+    account_id = request.get("account_id")
+    usernames = request.get("usernames", [])
+    
+    if not account_id or not usernames:
+        raise HTTPException(status_code=400, detail="缺少参数")
+    
+    try:
+        results = await account_manager.validate_usernames(account_id, usernames)
+        return {
+            "success": True,
+            "results": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============ 手机号登录 API ============
 
 @app.post("/api/accounts/send-code")
@@ -650,34 +683,80 @@ async def add_schedule(request: dict):
     """添加定时任务"""
     schedule_id = request.get("schedule_id")
     name = request.get("name")
-    cron = request.get("cron")
     action = request.get("action")
+    message = request.get("message")
+    enabled = request.get("enabled", True)
+    
+    # 新格式参数
+    execute_time = request.get("execute_time")
+    repeat = request.get("repeat", "once")
+    account_id = request.get("account_id")
+    friend_ids = request.get("friend_ids", [])
+    stranger_usernames = request.get("stranger_usernames", [])
+    interval = request.get("interval", 2000)
+    auto_dedup = request.get("auto_dedup", True)
+    validate_usernames = request.get("validate_usernames", True)
+    
+    # 兼容旧格式
+    cron = request.get("cron")
     target = request.get("target")
     template_id = request.get("template_id")
-    message = request.get("message")
     account_ids = request.get("account_ids")
-    enabled = request.get("enabled", True)
 
-    if not schedule_id or not name or not cron or not action or not target:
+    if not schedule_id or not name:
         raise HTTPException(status_code=400, detail="缺少必要参数")
+    
+    # 如果是新格式，转换为cron
+    if execute_time and not cron:
+        hour = execute_time.get("hour", 0)
+        minute = execute_time.get("minute", 0)
+        second = execute_time.get("second", 0)
+        day = execute_time.get("day", "*")
+        month = execute_time.get("month", "*")
+        
+        if repeat == "once":
+            cron = f"{minute} {hour} {day} {month} *"
+        elif repeat == "daily":
+            cron = f"{minute} {hour} * * *"
+        elif repeat == "weekly":
+            cron = f"{minute} {hour} * * 1"
+        elif repeat == "workday":
+            cron = f"{minute} {hour} * * 1-5"
+        else:
+            cron = f"{minute} {hour} * * *"
+    
+    # 设置target
+    if not target:
+        if friend_ids or stranger_usernames:
+            target = "custom"
+        else:
+            target = "all"
 
     success = task_scheduler.add_schedule(
         schedule_id=schedule_id,
         name=name,
-        cron=cron,
-        action=action,
+        cron=cron or "0 9 * * *",
+        action=action or "send_message",
         target=target,
         template_id=template_id,
         message=message,
-        account_ids=account_ids,
-        enabled=enabled
+        account_ids=account_ids or ([account_id] if account_id else []),
+        enabled=enabled,
+        # 新字段
+        execute_time=execute_time,
+        repeat=repeat,
+        friend_ids=friend_ids,
+        stranger_usernames=stranger_usernames,
+        interval=interval,
+        auto_dedup=auto_dedup,
+        validate_usernames=validate_usernames
     )
 
     if success:
         log_manager.add_log("定时任务", schedule_id, f"添加定时任务: {name}", "success")
         return {"success": True, "message": "定时任务添加成功"}
     else:
-        raise HTTPException(status_code=400, detail="任务ID已存在或cron表达式无效")
+        raise HTTPException(status_code=400, detail="任务添加失败")
 
 
 @app.delete("/api/schedules/{schedule_id}")

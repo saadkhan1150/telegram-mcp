@@ -367,7 +367,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="acc in accounts" :key="acc.account_id">
+                            <tr v-for="acc in pagedAccounts" :key="acc.account_id">
                                 <td>
                                     <span
                                         @click="copyAccountId(acc.account_id)"
@@ -413,6 +413,14 @@
                             </tr>
                         </tbody>
                     </table>
+                    <!-- 账号分页 -->
+                    <div v-if="accounts.length > accountPageSize" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <button class="btn btn-sm btn-outline" @click="accountPage = 1" :disabled="accountPage === 1">首页</button>
+                        <button class="btn btn-sm btn-outline" @click="accountPage--" :disabled="accountPage === 1">上一页</button>
+                        <span style="color: #999;">第 {{ accountPage }} / {{ accountTotalPages }} 页 (共 {{ accounts.length }} 个账号)</span>
+                        <button class="btn btn-sm btn-outline" @click="accountPage++" :disabled="accountPage >= accountTotalPages">下一页</button>
+                        <button class="btn btn-sm btn-outline" @click="accountPage = accountTotalPages" :disabled="accountPage >= accountTotalPages">末页</button>
+                    </div>
                 </div>
             </div>
 
@@ -662,20 +670,25 @@
                     </div>
                     
                     <div v-else>
-                        <div v-for="(tpl, i) in templates" :key="i" class="proxy-item" style="flex-direction: column; align-items: flex-start;">
+                        <div v-for="(tpl, i) in pagedTemplates" :key="tpl.template_id || tpl.id || i" class="proxy-item" style="flex-direction: column; align-items: flex-start;">
                             <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 10px;">
                                 <div>
                                     <h4 style="margin-bottom: 4px;">{{ tpl.name }} <span class="badge badge-info">{{ tpl.category }}</span></h4>
                                 </div>
                                 <div class="proxy-actions">
-                                    <button class="btn btn-sm btn-outline" @click="copyTemplate(tpl)">复制</button>
-                                    <button class="btn btn-sm btn-danger" @click="deleteTemplate(i)">删除</button>
+                                    <button class="btn btn-sm btn-outline" @click="copyTemplate(tpl)">📋 复制</button>
+                                    <button class="btn btn-sm btn-danger" @click="deleteTemplate(templates.indexOf(tpl))">删除</button>
                                 </div>
                             </div>
                             <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; width: 100%; font-size: 13px; white-space: pre-wrap;">{{ tpl.content }}</div>
-                            <div v-if="tpl.variables && tpl.variables.length" style="margin-top: 8px; font-size: 12px; color: #999;">
-                                变量: {{ tpl.variables.join(', ') }}
-                            </div>
+                        </div>
+                        <!-- 模板分页 -->
+                        <div v-if="templates.length > templatePageSize" style="display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 20px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <button class="btn btn-sm btn-outline" @click="templatePage = 1" :disabled="templatePage === 1">首页</button>
+                            <button class="btn btn-sm btn-outline" @click="templatePage--" :disabled="templatePage === 1">上一页</button>
+                            <span style="color: #999;">第 {{ templatePage }} / {{ templateTotalPages }} 页 (共 {{ templates.length }} 个模板)</span>
+                            <button class="btn btn-sm btn-outline" @click="templatePage++" :disabled="templatePage >= templateTotalPages">下一页</button>
+                            <button class="btn btn-sm btn-outline" @click="templatePage = templateTotalPages" :disabled="templatePage >= templateTotalPages">末页</button>
                         </div>
                     </div>
                 </div>
@@ -699,7 +712,7 @@
                 <div class="card">
                     <div class="card-header">
                         <h3>📅 定时计划</h3>
-                        <button class="btn btn-primary" @click="showScheduleModal = true">➕ 添加计划</button>
+                        <button class="btn btn-primary" @click="openScheduleModal">➕ 添加计划</button>
                     </div>
                     <p style="color: #999; margin-bottom: 20px;">查看和管理AI设置的定时任务</p>
                     
@@ -985,7 +998,7 @@
                 <h2 style="text-align: center; margin-bottom: 20px;">💬 添加消息模板</h2>
                 <div class="form-group">
                     <label>消息内容</label>
-                    <textarea v-model="newTemplate.content" class="form-control" rows="6" placeholder="请输入消息内容...支持使用 {name} {time} 等变量"></textarea>
+                    <textarea v-model="newTemplate.content" class="form-control" rows="6" placeholder="请输入消息内容..."></textarea>
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
                     <button class="btn btn-outline" @click="showTemplateModal = false">取消</button>
@@ -995,62 +1008,248 @@
         </div>
 
         <!-- Schedule Modal -->
-        <div v-if="showScheduleModal" class="modal" @click.self="showScheduleModal = false">
-            <div class="modal-content" style="text-align: left; min-width: 550px;">
+        <div v-if="showScheduleModal" class="modal" @click.self="closeScheduleModal">
+            <div class="modal-content" style="text-align: left; min-width: 700px; max-width: 900px; max-height: 90vh; overflow-y: auto;">
                 <h2 style="text-align: center; margin-bottom: 20px;">📅 添加定时计划</h2>
-                <div class="form-group">
-                    <label>计划名称</label>
-                    <input v-model="newSchedule.name" class="form-control" placeholder="每日早安">
-                </div>
-                <div class="form-group">
-                    <label>描述</label>
-                    <input v-model="newSchedule.description" class="form-control" placeholder="每天早上9点发送早安消息">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>执行时间</label>
-                        <input v-model="newSchedule.time" type="time" class="form-control">
+                
+                <!-- 步骤指示器 -->
+                <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 25px;">
+                    <div :style="{ color: scheduleStep === 1 ? '#667eea' : '#666' }">
+                        <span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 5px;"
+                              :style="{ background: scheduleStep === 1 ? '#667eea' : 'rgba(255,255,255,0.1)', color: scheduleStep === 1 ? '#fff' : '#666' }">1</span>
+                        基本设置
                     </div>
+                    <div :style="{ color: scheduleStep === 2 ? '#667eea' : '#666' }">
+                        <span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 5px;"
+                              :style="{ background: scheduleStep === 2 ? '#667eea' : 'rgba(255,255,255,0.1)', color: scheduleStep === 2 ? '#fff' : '#666' }">2</span>
+                        发送目标
+                    </div>
+                    <div :style="{ color: scheduleStep === 3 ? '#667eea' : '#666' }">
+                        <span style="display: inline-block; width: 24px; height: 24px; border-radius: 50%; text-align: center; line-height: 24px; margin-right: 5px;"
+                              :style="{ background: scheduleStep === 3 ? '#667eea' : 'rgba(255,255,255,0.1)', color: scheduleStep === 3 ? '#fff' : '#666' }">3</span>
+                        发送设置
+                    </div>
+                </div>
+
+                <!-- 步骤1: 基本设置 -->
+                <div v-if="scheduleStep === 1">
                     <div class="form-group">
-                        <label>重复</label>
-                        <select v-model="newSchedule.repeat" class="form-control">
-                            <option value="once">仅一次</option>
-                            <option value="daily">每天</option>
-                            <option value="weekly">每周</option>
-                            <option value="workday">工作日</option>
+                        <label>消息来源</label>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.messageSource === 'input' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.messageSource === 'input' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.messageSource" value="input" style="display: none;"> ✏️ 自己输入
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.messageSource === 'template' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.messageSource === 'template' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.messageSource" value="template" style="display: none;"> 📋 选择模板
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div v-if="newSchedule.messageSource === 'input'" class="form-group">
+                        <label>消息内容 <span style="color: #e74c3c;">*</span></label>
+                        <textarea v-model="newSchedule.message" class="form-control" rows="4" placeholder="请输入要发送的内容..."></textarea>
+                    </div>
+                    
+                    <div v-else class="form-group">
+                        <label>选择消息模板 <span style="color: #e74c3c;">*</span></label>
+                        <select v-model="newSchedule.templateId" class="form-control" @change="onTemplateSelect">
+                            <option value="">-- 请选择模板 --</option>
+                            <option v-for="tpl in templates" :key="tpl.template_id || tpl.id" :value="tpl.template_id || tpl.id">
+                                {{ tpl.name || '模板' + (templates.indexOf(tpl) + 1) }}
+                            </option>
+                        </select>
+                        <div v-if="newSchedule.templateId && selectedTemplateContent" 
+                             style="margin-top: 10px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; font-size: 13px; white-space: pre-wrap; max-height: 150px; overflow-y: auto;">
+                            {{ selectedTemplateContent }}
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>执行时间 <span style="color: #e74c3c;">*</span></label>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <select v-model="newSchedule.month" class="form-control" style="width: 80px;">
+                                <option v-for="m in 12" :key="m" :value="m">{{ m }}月</option>
+                            </select>
+                            <select v-model="newSchedule.day" class="form-control" style="width: 80px;">
+                                <option v-for="d in 31" :key="d" :value="d">{{ d }}日</option>
+                            </select>
+                            <select v-model="newSchedule.hour" class="form-control" style="width: 80px;">
+                                <option v-for="h in 24" :key="h-1" :value="h-1">{{ (h-1).toString().padStart(2,'0') }}时</option>
+                            </select>
+                            <select v-model="newSchedule.minute" class="form-control" style="width: 80px;">
+                                <option v-for="m in 60" :key="m-1" :value="m-1">{{ (m-1).toString().padStart(2,'0') }}分</option>
+                            </select>
+                            <select v-model="newSchedule.second" class="form-control" style="width: 80px;">
+                                <option v-for="s in 60" :key="s-1" :value="s-1">{{ (s-1).toString().padStart(2,'0') }}秒</option>
+                            </select>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">年份自动跟随当前年 ({{ currentYear }}年)</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>重复方式</label>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.repeat === 'once' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.repeat === 'once' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.repeat" value="once" style="display: none;"> 仅一次
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.repeat === 'daily' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.repeat === 'daily' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.repeat" value="daily" style="display: none;"> 每天
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.repeat === 'weekly' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.repeat === 'weekly' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.repeat" value="weekly" style="display: none;"> 每周
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.repeat === 'workday' ? 'rgba(102,126,234,0.2)' : 'transparent', borderColor: newSchedule.repeat === 'workday' ? '#667eea' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.repeat" value="workday" style="display: none;"> 工作日
+                            </label>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            {{ newSchedule.repeat === 'once' ? '只执行一次' : 
+                               newSchedule.repeat === 'daily' ? '每24小时执行一次' : 
+                               newSchedule.repeat === 'weekly' ? '每7天执行一次' : 
+                               '周一至周五执行，周六日不执行' }}
+                        </p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>执行动作</label>
+                        <div style="display: flex; gap: 10px; margin-top: 8px;">
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.action === 'send_message' ? 'rgba(39,174,96,0.2)' : 'transparent', borderColor: newSchedule.action === 'send_message' ? '#27ae60' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.action" value="send_message" style="display: none;"> 📤 发送消息
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 8px 15px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);"
+                                   :style="{ background: newSchedule.action === 'ai_execute' ? 'rgba(52,152,219,0.2)' : 'transparent', borderColor: newSchedule.action === 'ai_execute' ? '#3498db' : 'rgba(255,255,255,0.1)' }">
+                                <input type="radio" v-model="newSchedule.action" value="ai_execute" style="display: none;"> 🤖 AI执行
+                            </label>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            {{ newSchedule.action === 'send_message' ? '原文发送，不做任何修改' : 'AI会对内容进行情感优化后发送' }}
+                        </p>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px;">
+                        <button class="btn btn-outline" @click="closeScheduleModal">取消</button>
+                        <button class="btn btn-primary" @click="scheduleStep = 2" 
+                                :disabled="newSchedule.messageSource === 'input' ? !newSchedule.message : !newSchedule.templateId">下一步</button>
+                    </div>
+                </div>
+
+                <!-- 步骤2: 发送目标 -->
+                <div v-if="scheduleStep === 2">
+                    <div class="form-group">
+                        <label>选择发送账号 <span style="color: #e74c3c;">*</span></label>
+                        <select v-model="newSchedule.selectedAccount" class="form-control" @change="loadAccountFriends">
+                            <option value="">-- 请选择账号 --</option>
+                            <option v-for="acc in accounts" :key="acc.account_id" :value="acc.account_id">
+                                {{ acc.username || acc.account_id }} ({{ acc.user_id }})
+                            </option>
                         </select>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label>执行动作</label>
-                    <select v-model="newSchedule.action" class="form-control">
-                        <option value="send_message">发送消息</option>
-                        <option value="send_template">发送模板</option>
-                        <option value="custom">自定义（AI执行）</option>
-                    </select>
-                </div>
-                <div v-if="newSchedule.action === 'send_message'" class="form-group">
-                    <label>消息内容</label>
-                    <textarea v-model="newSchedule.message" class="form-control" rows="3" placeholder="要发送的消息"></textarea>
-                </div>
-                <div v-if="newSchedule.action === 'send_template'" class="form-group">
-                    <label>选择模板</label>
-                    <select v-model="newSchedule.template_id" class="form-control">
-                        <option v-for="tpl in templates" :key="tpl.template_id || tpl.id" :value="tpl.template_id || tpl.id">{{ tpl.name }}</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>选择账号</label>
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
-                        <label v-for="acc in accounts" :key="acc.account_id" style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 13px;">
-                            <input type="checkbox" v-model="newSchedule.accounts" :value="acc.account_id">
-                            {{ acc.account_id }}
+                    
+                    <!-- 好友列表 -->
+                    <div v-if="newSchedule.selectedAccount" class="form-group">
+                        <label style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>选择好友 ({{ selectedFriendsCount }}/{{ accountFriends.length }})</span>
+                            <span>
+                                <button class="btn btn-sm btn-outline" @click="selectAllFriends" style="margin-right: 5px;">全选</button>
+                                <button class="btn btn-sm btn-outline" @click="deselectAllFriends">取消全选</button>
+                            </span>
                         </label>
+                        <div v-if="loadingFriends" style="text-align: center; padding: 20px; color: #999;">
+                            <span class="loading"></span> 加载好友列表中...
+                        </div>
+                        <div v-else-if="accountFriends.length === 0" style="text-align: center; padding: 20px; color: #999;">
+                            该账号暂无好友
+                        </div>
+                        <div v-else style="max-height: 200px; overflow-y: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px;">
+                            <label v-for="friend in accountFriends" :key="friend.id" 
+                                   style="display: flex; align-items: center; gap: 8px; padding: 8px; cursor: pointer; border-radius: 6px;"
+                                   :style="{ background: newSchedule.selectedFriends.includes(friend.id) ? 'rgba(102,126,234,0.1)' : 'transparent' }">
+                                <input type="checkbox" v-model="newSchedule.selectedFriends" :value="friend.id">
+                                <span>{{ friend.name || friend.username || friend.id }}</span>
+                                <span v-if="friend.username" style="color: #666; font-size: 12px;">@{{ friend.username }}</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 陌生人发送 -->
+                    <div class="form-group" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <label style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>📝 陌生人用户名 (无需加好友，最多5000个)</span>
+                            <input type="file" ref="usernameFile" @change="importUsernames" accept=".txt,.csv" style="display: none;">
+                            <button class="btn btn-sm btn-outline" @click="$refs.usernameFile.click()">📁 导入文件</button>
+                        </label>
+                        <textarea v-model="newSchedule.strangerUsernames" class="form-control" rows="4" 
+                                  placeholder="每行一个用户名，例如：&#10;username1&#10;username2&#10;@username3"></textarea>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                            已输入 {{ strangerUsernameCount }} 个用户名
+                            <span v-if="strangerUsernameCount > 5000" style="color: #e74c3c;">（超出限制！）</span>
+                        </p>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px;">
+                        <button class="btn btn-outline" @click="scheduleStep = 1">上一步</button>
+                        <button class="btn btn-primary" @click="scheduleStep = 3" 
+                                :disabled="!newSchedule.selectedAccount || (newSchedule.selectedFriends.length === 0 && strangerUsernameCount === 0)">
+                            下一步
+                        </button>
                     </div>
                 </div>
-                <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
-                    <button class="btn btn-outline" @click="showScheduleModal = false">取消</button>
-                    <button class="btn btn-primary" @click="addSchedule" :disabled="!newSchedule.name || !newSchedule.time">添加</button>
+
+                <!-- 步骤3: 发送设置 -->
+                <div v-if="scheduleStep === 3">
+                    <div class="form-group">
+                        <label>发送间隔</label>
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <input type="range" v-model="newSchedule.interval" min="500" max="50000" step="100" style="flex: 1;">
+                            <span style="min-width: 100px; text-align: right;">{{ formatInterval(newSchedule.interval) }}</span>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 5px;">每条消息发送间隔（500毫秒 - 50秒）</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" v-model="newSchedule.autoDedup">
+                            <span>🔄 自动去重</span>
+                        </label>
+                        <p style="font-size: 12px; color: #666; margin-left: 25px;">自动过滤重复的用户名</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox" v-model="newSchedule.validateUsernames">
+                            <span>✅ 验证用户名</span>
+                        </label>
+                        <p style="font-size: 12px; color: #666; margin-left: 25px;">发送前验证用户名是否真实存在，自动过滤无效用户名</p>
+                    </div>
+                    
+                    <!-- 发送预览 -->
+                    <div style="background: rgba(255,255,255,0.03); border-radius: 10px; padding: 15px; margin-top: 20px;">
+                        <h4 style="margin-bottom: 15px;">📋 发送预览</h4>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 13px;">
+                            <div><span style="color: #999;">执行时间:</span> {{ currentYear }}年{{ newSchedule.month }}月{{ newSchedule.day }}日 {{ newSchedule.hour.toString().padStart(2,'0') }}:{{ newSchedule.minute.toString().padStart(2,'0') }}:{{ newSchedule.second.toString().padStart(2,'0') }}</div>
+                            <div><span style="color: #999;">重复方式:</span> {{ { once: '仅一次', daily: '每天', weekly: '每周', workday: '工作日' }[newSchedule.repeat] }}</div>
+                            <div><span style="color: #999;">执行动作:</span> {{ newSchedule.action === 'send_message' ? '原文发送' : 'AI优化发送' }}</div>
+                            <div><span style="color: #999;">发送账号:</span> {{ newSchedule.selectedAccount }}</div>
+                            <div><span style="color: #999;">好友数量:</span> {{ newSchedule.selectedFriends.length }} 人</div>
+                            <div><span style="color: #999;">陌生人数量:</span> {{ strangerUsernameCount }} 人</div>
+                            <div><span style="color: #999;">发送间隔:</span> {{ formatInterval(newSchedule.interval) }}</div>
+                            <div><span style="color: #999;">总发送数:</span> {{ newSchedule.selectedFriends.length + strangerUsernameCount }} 人</div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 25px;">
+                        <button class="btn btn-outline" @click="scheduleStep = 2">上一步</button>
+                        <button class="btn btn-primary" @click="addSchedule" :disabled="scheduleSubmitting">
+                            {{ scheduleSubmitting ? '创建中...' : '创建计划' }}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1299,8 +1498,34 @@
 
                     // Schedule Modal
                     showScheduleModal: false,
+                    scheduleStep: 1,
+                    scheduleSubmitting: false,
                     schedules: [],
-                    newSchedule: { name: '', description: '', time: '', repeat: 'daily', action: 'send_message', message: '', template_id: '', accounts: [] },
+                    newSchedule: {
+                        messageSource: 'input',
+                        message: '',
+                        templateId: '',
+                        month: new Date().getMonth() + 1,
+                        day: new Date().getDate(),
+                        hour: new Date().getHours(),
+                        minute: new Date().getMinutes(),
+                        second: new Date().getSeconds(),
+                        repeat: 'once',
+                        action: 'send_message',
+                        selectedAccount: '',
+                        selectedFriends: [],
+                        strangerUsernames: '',
+                        interval: 2000,
+                        autoDedup: true,
+                        validateUsernames: true
+                    },
+                    // 分页
+                    accountPage: 1,
+                    accountPageSize: 10,
+                    templatePage: 1,
+                    templatePageSize: 5,
+                    accountFriends: [],
+                    loadingFriends: false,
                     todayExecutions: 0,
                     pendingExecutions: 0,
 
@@ -1315,6 +1540,33 @@
             computed: {
                 onlineCount() { return this.accounts.filter(a => a.status === 'online').length },
                 offlineCount() { return this.accounts.filter(a => a.status !== 'online').length },
+                currentYear() { return new Date().getFullYear() },
+                selectedFriendsCount() { return this.newSchedule.selectedFriends.length },
+                strangerUsernameCount() {
+                    if (!this.newSchedule.strangerUsernames) return 0
+                    return this.newSchedule.strangerUsernames.split('\n').filter(u => u.trim()).length
+                },
+                selectedTemplateContent() {
+                    if (!this.newSchedule.templateId) return ''
+                    const tpl = this.templates.find(t => (t.template_id || t.id) === this.newSchedule.templateId)
+                    return tpl ? tpl.content : ''
+                },
+                // 账号分页
+                pagedAccounts() {
+                    const start = (this.accountPage - 1) * this.accountPageSize
+                    return this.accounts.slice(start, start + this.accountPageSize)
+                },
+                accountTotalPages() {
+                    return Math.ceil(this.accounts.length / this.accountPageSize) || 1
+                },
+                // 模板分页
+                pagedTemplates() {
+                    const start = (this.templatePage - 1) * this.templatePageSize
+                    return this.templates.slice(start, start + this.templatePageSize)
+                },
+                templateTotalPages() {
+                    return Math.ceil(this.templates.length / this.templatePageSize) || 1
+                },
                 popularCountries() {
                     return [
                         { code: '86', name: '中国', flag: '🇨🇳' },
@@ -1788,8 +2040,10 @@
                 },
 
                 toggleProxyPassword(proxyId) {
-                    // 切换代理密码显示状态，使用 Vue.set 确保响应式更新
-                    this.$set(this.proxyPasswordVisible, proxyId, !this.proxyPasswordVisible[proxyId])
+                    // 切换代理密码显示状态，重新赋值触发响应式
+                    const newState = { ...this.proxyPasswordVisible }
+                    newState[proxyId] = !newState[proxyId]
+                    this.proxyPasswordVisible = newState
                 },
 
                 // Templates
@@ -1844,37 +2098,139 @@
                 },
 
                 // Schedules
-                async addSchedule() {
-                    const schedule_id = 'sched_' + Date.now()
-                    // Convert time to cron format
-                    const [hours, minutes] = this.newSchedule.time.split(':')
-                    let cron = `${minutes} ${hours} * * *`
-                    if (this.newSchedule.repeat === 'weekly') {
-                        cron = `${minutes} ${hours} * * 1`
-                    } else if (this.newSchedule.repeat === 'hourly') {
-                        cron = `0 * * * *`
+                openScheduleModal() {
+                    const now = new Date()
+                    this.scheduleStep = 1
+                    this.scheduleSubmitting = false
+                    this.newSchedule = {
+                        messageSource: 'input',
+                        message: '',
+                        templateId: '',
+                        month: now.getMonth() + 1,
+                        day: now.getDate(),
+                        hour: now.getHours(),
+                        minute: now.getMinutes(),
+                        second: now.getSeconds(),
+                        repeat: 'once',
+                        action: 'send_message',
+                        selectedAccount: '',
+                        selectedFriends: [],
+                        strangerUsernames: '',
+                        interval: 2000,
+                        autoDedup: true,
+                        validateUsernames: true
                     }
-
+                    this.accountFriends = []
+                    this.showScheduleModal = true
+                },
+                onTemplateSelect() {
+                    // 选择模板时，自动填充message
+                    if (this.newSchedule.templateId) {
+                        this.newSchedule.message = this.selectedTemplateContent
+                    }
+                },
+                closeScheduleModal() {
+                    this.showScheduleModal = false
+                    this.scheduleStep = 1
+                },
+                async loadAccountFriends() {
+                    if (!this.newSchedule.selectedAccount) {
+                        this.accountFriends = []
+                        return
+                    }
+                    this.loadingFriends = true
+                    this.newSchedule.selectedFriends = []
+                    try {
+                        const res = await axios.get(`/api/accounts/${this.newSchedule.selectedAccount}/friends`)
+                        this.accountFriends = res.data.friends || []
+                    } catch (e) {
+                        this.showToast('加载好友列表失败', true)
+                        this.accountFriends = []
+                    }
+                    this.loadingFriends = false
+                },
+                selectAllFriends() {
+                    this.newSchedule.selectedFriends = this.accountFriends.map(f => f.id)
+                },
+                deselectAllFriends() {
+                    this.newSchedule.selectedFriends = []
+                },
+                importUsernames(event) {
+                    const file = event.target.files[0]
+                    if (!file) return
+                    const reader = new FileReader()
+                    reader.onload = (e) => {
+                        const content = e.target.result
+                        const lines = content.split(/[\r\n]+/).filter(l => l.trim())
+                        if (this.newSchedule.strangerUsernames) {
+                            this.newSchedule.strangerUsernames += '\n' + lines.join('\n')
+                        } else {
+                            this.newSchedule.strangerUsernames = lines.join('\n')
+                        }
+                        this.showToast(`已导入 ${lines.length} 个用户名`)
+                    }
+                    reader.readAsText(file)
+                    event.target.value = ''
+                },
+                formatInterval(ms) {
+                    if (ms < 1000) return ms + '毫秒'
+                    return (ms / 1000).toFixed(1) + '秒'
+                },
+                async addSchedule() {
+                    this.scheduleSubmitting = true
+                    const schedule_id = 'sched_' + Date.now()
+                    
+                    // 处理陌生人用户名
+                    let strangers = []
+                    if (this.newSchedule.strangerUsernames) {
+                        strangers = this.newSchedule.strangerUsernames
+                            .split('\n')
+                            .map(u => u.trim().replace(/^@/, ''))
+                            .filter(u => u)
+                        
+                        // 去重
+                        if (this.newSchedule.autoDedup) {
+                            strangers = [...new Set(strangers)]
+                        }
+                        
+                        // 限制5000个
+                        if (strangers.length > 5000) {
+                            strangers = strangers.slice(0, 5000)
+                            this.showToast('用户名已截断至5000个', true)
+                        }
+                    }
+                    
                     try {
                         await axios.post('/api/schedules', {
                             schedule_id,
-                            name: this.newSchedule.name,
-                            cron,
-                            action: this.newSchedule.action === 'send_message' ? 'send_message' : 'send_template',
-                            target: 'all', // For simplicity
+                            name: `定时发送_${schedule_id}`,
+                            execute_time: {
+                                year: this.currentYear,
+                                month: this.newSchedule.month,
+                                day: this.newSchedule.day,
+                                hour: this.newSchedule.hour,
+                                minute: this.newSchedule.minute,
+                                second: this.newSchedule.second
+                            },
+                            repeat: this.newSchedule.repeat,
+                            action: this.newSchedule.action,
                             message: this.newSchedule.message,
-                            template_id: this.newSchedule.template_id,
-                            account_ids: this.newSchedule.accounts,
+                            account_id: this.newSchedule.selectedAccount,
+                            friend_ids: this.newSchedule.selectedFriends,
+                            stranger_usernames: strangers,
+                            interval: this.newSchedule.interval,
+                            auto_dedup: this.newSchedule.autoDedup,
+                            validate_usernames: this.newSchedule.validateUsernames,
                             enabled: true
                         })
                         this.showToast('定时计划添加成功')
-                        this.addLog('添加定时计划', this.newSchedule.name)
-                        this.showScheduleModal = false
-                        this.newSchedule = { name: '', description: '', time: '', repeat: 'daily', action: 'send_message', message: '', template_id: '', accounts: [] }
+                        this.addLog('添加定时计划', schedule_id)
+                        this.closeScheduleModal()
                         await this.loadSchedules()
                     } catch (e) {
                         this.showToast(e.response?.data?.detail || '添加失败', true)
                     }
+                    this.scheduleSubmitting = false
                 },
 
                 async toggleSchedule(i) {

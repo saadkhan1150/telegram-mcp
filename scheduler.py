@@ -65,7 +65,16 @@ class TaskScheduler:
         template_id: str = None,
         accounts: List[str] = None,
         account_ids: List[str] = None,  # 兼容 dashboard.py 传入的参数名
-        enabled: bool = True
+        enabled: bool = True,
+        # 新参数
+        execute_time: Dict = None,
+        repeat: str = None,
+        friend_ids: List = None,
+        stranger_usernames: List = None,
+        interval: int = 2000,
+        auto_dedup: bool = True,
+        validate_usernames: bool = True,
+        **kwargs  # 忽略其他未知参数
     ) -> bool:
         """
         添加定时任务
@@ -110,7 +119,15 @@ class TaskScheduler:
             "lastRun": None,  # 前端使用的字段名（驼峰命名）
             "next_run": self._get_next_run(cron),
             "run_count": 0,
-            "fail_count": 0
+            "fail_count": 0,
+            # 新字段
+            "execute_time": execute_time,
+            "repeat": repeat,
+            "friend_ids": friend_ids or [],
+            "stranger_usernames": stranger_usernames or [],
+            "interval": interval,
+            "auto_dedup": auto_dedup,
+            "validate_usernames": validate_usernames
         }
 
         self._save_schedules()
@@ -185,7 +202,13 @@ class TaskScheduler:
         """
         try:
             action = schedule["action"]
-            target = schedule["target"]
+            message = schedule.get("message", "")
+            
+            # 获取发送目标
+            friend_ids = schedule.get("friend_ids", [])
+            stranger_usernames = schedule.get("stranger_usernames", [])
+            interval = schedule.get("interval", 2000)  # 毫秒
+            
             # 兼容 accounts 和 account_ids 字段
             accounts = schedule.get("accounts") or schedule.get("account_ids")
 
@@ -194,45 +217,71 @@ class TaskScheduler:
                 accounts = list(account_manager.accounts.keys())
 
             results = []
+            
+            # 使用第一个账号发送（通常定时任务只选一个账号）
+            account_id = accounts[0] if accounts else None
+            if not account_id:
+                log_manager.add_log("定时任务", "system", "没有可用账号", "error")
+                return False
 
-            for account_id in accounts:
-                try:
-                    # 获取客户端
-                    client = await account_manager.get_client(account_id)
-                    if not client:
-                        log_manager.add_log("定时任务", account_id, f"获取客户端失败", "error")
-                        continue
+            try:
+                # 获取客户端
+                client = await account_manager.get_client(account_id)
+                if not client:
+                    log_manager.add_log("定时任务", account_id, "获取客户端失败", "error")
+                    return False
 
-                    # 处理特殊 target 值 'all' - 发送到 Saved Messages
-                    effective_target = 'me' if target == 'all' else target
-
-                    # 执行动作
-                    if action == "send_message":
-                        message = schedule.get("message", "")
-                        entity = await client.get_entity(effective_target)
+                # 合并发送目标
+                targets = []
+                for fid in friend_ids:
+                    targets.append({"type": "id", "value": fid})
+                for username in stranger_usernames:
+                    targets.append({"type": "username", "value": username})
+                
+                # 如果没有指定目标，发送到 Saved Messages
+                if not targets:
+                    targets = [{"type": "id", "value": "me"}]
+                
+                success_count = 0
+                fail_count = 0
+                
+                for i, target in enumerate(targets):
+                    try:
+                        # 获取目标实体
+                        target_value = target["value"]
+                        entity = await client.get_entity(target_value)
+                        
+                        # 发送消息
+                        # ai_execute 暂时和 send_message 一样（AI优化需要用户自己调用MCP）
                         await client.send_message(entity, message)
-                        results.append({"account": account_id, "success": True})
+                        success_count += 1
+                        
+                        log_manager.add_log("定时任务", account_id, 
+                            f"发送成功: {target_value}", "success")
+                        
+                        # 发送间隔（除了最后一条）
+                        if i < len(targets) - 1:
+                            await asyncio.sleep(interval / 1000)
+                            
+                    except Exception as e:
+                        fail_count += 1
+                        log_manager.add_log("定时任务", account_id, 
+                            f"发送失败 {target_value}: {str(e)}", "error")
+                
+                results.append({
+                    "account": account_id, 
+                    "success": success_count > 0,
+                    "sent": success_count,
+                    "failed": fail_count
+                })
+                
+                log_manager.add_log("定时任务", account_id, 
+                    f"执行完成: {schedule['name']} (成功{success_count}/失败{fail_count})", 
+                    "success" if fail_count == 0 else "warning")
 
-                    elif action == "send_template":
-                        template_id = schedule.get("template_id")
-                        if template_id:
-                            # 渲染模板
-                            content = template_manager.render_template(
-                                template_id,
-                                name=account_id,
-                                time=datetime.now().strftime("%H:%M"),
-                                date=datetime.now().strftime("%Y-%m-%d")
-                            )
-                            if content:
-                                entity = await client.get_entity(effective_target)
-                                await client.send_message(entity, content)
-                                results.append({"account": account_id, "success": True})
-
-                    log_manager.add_log("定时任务", account_id, f"执行成功: {schedule['name']}", "success")
-
-                except Exception as e:
-                    log_manager.add_log("定时任务", account_id, f"执行失败: {str(e)}", "error")
-                    results.append({"account": account_id, "success": False, "error": str(e)})
+            except Exception as e:
+                log_manager.add_log("定时任务", account_id, f"执行失败: {str(e)}", "error")
+                results.append({"account": account_id, "success": False, "error": str(e)})
 
             # 更新任务统计
             now_iso = datetime.now().isoformat()
@@ -263,29 +312,101 @@ class TaskScheduler:
         while self.running:
             try:
                 now = datetime.now()
+                
+                # 重新加载配置（支持动态添加任务）
+                self._load_schedules()
 
-                for schedule_id, schedule in self.schedules.items():
+                for schedule_id, schedule in list(self.schedules.items()):
                     # 检查是否启用
                     if not schedule.get("enabled", True):
                         continue
 
-                    # 检查是否到达执行时间
-                    next_run = schedule.get("next_run", "")
-                    if next_run:
-                        next_time = datetime.fromisoformat(next_run)
-                        # 如果当前时间已经超过或接近下次执行时间（允许1分钟误差）
-                        if (now - next_time).total_seconds() >= 0:
-                            if (now - next_time).total_seconds() < 60:  # 1分钟内执行
-                                # 执行任务
-                                print(f"⏰ 执行定时任务: {schedule['name']}")
-                                await self._execute_schedule(schedule)
+                    # 检查执行时间
+                    execute_time = schedule.get("execute_time")
+                    repeat = schedule.get("repeat", "once")
+                    last_run = schedule.get("last_run")
+                    
+                    should_execute = False
+                    
+                    if execute_time:
+                        # 新格式：精确时间
+                        target_time = datetime(
+                            execute_time.get("year", now.year),
+                            execute_time.get("month", now.month),
+                            execute_time.get("day", now.day),
+                            execute_time.get("hour", 0),
+                            execute_time.get("minute", 0),
+                            execute_time.get("second", 0)
+                        )
+                        
+                        # 检查是否应该执行
+                        time_diff = (now - target_time).total_seconds()
+                        
+                        if repeat == "once":
+                            # 仅一次：到时间且未执行过
+                            if 0 <= time_diff < 30 and not last_run:
+                                should_execute = True
+                        elif repeat == "daily":
+                            # 每天：检查时分秒是否匹配
+                            if (now.hour == execute_time.get("hour", 0) and 
+                                now.minute == execute_time.get("minute", 0) and
+                                abs(now.second - execute_time.get("second", 0)) < 10):
+                                # 检查今天是否已执行
+                                if last_run:
+                                    last_run_time = datetime.fromisoformat(last_run)
+                                    if last_run_time.date() < now.date():
+                                        should_execute = True
+                                else:
+                                    should_execute = True
+                        elif repeat == "weekly":
+                            # 每周：检查星期几+时分秒
+                            if (now.weekday() == target_time.weekday() and
+                                now.hour == execute_time.get("hour", 0) and
+                                now.minute == execute_time.get("minute", 0)):
+                                if last_run:
+                                    last_run_time = datetime.fromisoformat(last_run)
+                                    if (now - last_run_time).days >= 7:
+                                        should_execute = True
+                                else:
+                                    should_execute = True
+                        elif repeat == "workday":
+                            # 工作日：周一到周五
+                            if (now.weekday() < 5 and  # 0-4是周一到周五
+                                now.hour == execute_time.get("hour", 0) and
+                                now.minute == execute_time.get("minute", 0)):
+                                if last_run:
+                                    last_run_time = datetime.fromisoformat(last_run)
+                                    if last_run_time.date() < now.date():
+                                        should_execute = True
+                                else:
+                                    should_execute = True
+                    else:
+                        # 旧格式：cron
+                        next_run = schedule.get("next_run", "")
+                        if next_run:
+                            next_time = datetime.fromisoformat(next_run)
+                            if 0 <= (now - next_time).total_seconds() < 30:
+                                should_execute = True
+                    
+                    if should_execute:
+                        # AI执行类型的任务不自动执行，等待AI通过MCP处理
+                        if schedule.get("action") == "ai_execute":
+                            print(f"⏰ AI任务已就绪，等待AI润色: {schedule['name']}")
+                            log_manager.add_log("定时任务", "system", f"AI任务就绪，等待润色: {schedule['name']}", "info")
+                            # 不执行，让AI通过get_pending_ai_tasks获取并润色后执行
+                        else:
+                            print(f"⏰ 执行定时任务: {schedule['name']}")
+                            log_manager.add_log("定时任务", "system", f"开始执行: {schedule['name']}", "info")
+                            await self._execute_schedule(schedule)
 
-                # 每分钟检查一次
-                await asyncio.sleep(60)
+                # 每10秒检查一次（更精确）
+                await asyncio.sleep(10)
 
             except Exception as e:
                 print(f"调度器错误: {e}")
-                await asyncio.sleep(60)
+                import traceback
+                traceback.print_exc()
+                await asyncio.sleep(10)
 
     def stop(self):
         """停止调度器"""
