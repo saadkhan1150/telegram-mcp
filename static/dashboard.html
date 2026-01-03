@@ -718,10 +718,10 @@
                                         {{ sch.enabled ? '启用' : '禁用' }}
                                     </span>
                                 </h4>
-                                <p>{{ sch.description }}</p>
+                                <p>{{ getScheduleDescription(sch) }}</p>
                                 <p style="margin-top: 5px;">
                                     <span class="badge badge-info">{{ sch.cron || sch.time }}</span>
-                                    <span style="margin-left: 10px; color: #666;">账号: {{ sch.accounts?.join(', ') || '全部' }}</span>
+                                    <span style="margin-left: 10px; color: #666;">账号: {{ sch.accounts?.join(', ') || sch.account_ids?.join(', ') || '全部' }}</span>
                                 </p>
                                 <p v-if="sch.lastRun" style="font-size: 12px; color: #666; margin-top: 5px;">
                                     上次执行: {{ formatTime(sch.lastRun) }}
@@ -1921,6 +1921,25 @@
                         if (diff < 86400) return Math.floor(diff / 3600) + '小时前'
                         return Math.floor(diff / 86400) + '天前'
                     } catch { return '-' }
+                },
+
+                getScheduleDescription(sch) {
+                    // 生成定时计划的描述信息
+                    const actionMap = {
+                        'send_message': '发送消息',
+                        'send_template': '发送模板'
+                    }
+                    const action = actionMap[sch.action] || sch.action
+                    const target = sch.target || '未指定'
+                    let detail = ''
+
+                    if (sch.action === 'send_message' && sch.message) {
+                        detail = sch.message.substring(0, 50) + (sch.message.length > 50 ? '...' : '')
+                    } else if (sch.action === 'send_template' && sch.template_id) {
+                        detail = `模板: ${sch.template_id}`
+                    }
+
+                    return `${action} → ${target}${detail ? ': ' + detail : ''}`
                 }
             },
             watch: {
