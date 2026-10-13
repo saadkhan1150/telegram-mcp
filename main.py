@@ -49,6 +49,27 @@ logger = logging.getLogger("telegram_mcp")
 
 
 # ============================================================================
+# File path security
+# ============================================================================
+
+ALLOWED_FILE_DIR = os.environ.get("TELEGRAM_MCP_FILE_DIR", os.getcwd())
+
+
+def validate_file_path(file_path: str) -> str:
+    """Validate that file_path is within the allowed directory."""
+    real = os.path.realpath(file_path)
+    allowed = os.path.realpath(ALLOWED_FILE_DIR)
+    if not real.startswith(allowed + os.sep) and real != allowed:
+        raise ValueError(
+            f"Access denied: {file_path} is outside allowed directory ({ALLOWED_FILE_DIR}). "
+            f"Set TELEGRAM_MCP_FILE_DIR to change the allowed directory."
+        )
+    if not os.path.exists(real):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    return real
+
+
+# ============================================================================
 # 错误处理
 # ============================================================================
 
@@ -1213,6 +1234,7 @@ async def send_photo(
         caption: 图片说明
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
         await c.send_file(entity, file_path, caption=caption)
@@ -1235,6 +1257,7 @@ async def send_video(
         caption: 视频说明
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
         await c.send_file(entity, file_path, caption=caption, supports_streaming=True)
@@ -1257,6 +1280,7 @@ async def send_document(
         caption: 文件说明
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
         await c.send_file(entity, file_path, caption=caption, force_document=True)
@@ -1277,6 +1301,7 @@ async def send_voice(
         file_path: 语音文件路径
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
         await c.send_file(entity, file_path, voice_note=True)
@@ -1301,6 +1326,7 @@ async def send_audio(
         performer: 演者
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
         await c.send_file(entity, file_path, attributes=(title, performer))
@@ -2436,6 +2462,7 @@ async def send_sticker(chat_id: Union[int, str], file_path: str) -> str:
         发送结果信息
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
 
@@ -2465,6 +2492,7 @@ async def send_gif(chat_id: Union[int, str], file_path: str, caption: str = "") 
         发送结果信息
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
         entity = await c.get_entity(chat_id)
 
@@ -2592,14 +2620,11 @@ async def send_media_group(
         发送结果信息
     """
     try:
+        validated_paths = [validate_file_path(p) for p in file_paths]
         c = await get_client()
         entity = await c.get_entity(chat_id)
 
-        files = []
-        for path in file_paths:
-            files.append(path)
-
-        await c.send_file(entity, files, caption=caption)
+        await c.send_file(entity, validated_paths, caption=caption)
 
         return f"✅ 媒体组已发送（{len(files)}个文件）"
     except Exception as e:
@@ -3443,6 +3468,7 @@ async def save_file(file_path: str) -> str:
         保存结果信息
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
 
         # 获取 Saved Messages 聊天
@@ -3473,6 +3499,7 @@ async def profile_photo(file_path: str) -> str:
         设置结果信息
     """
     try:
+        file_path = validate_file_path(file_path)
         c = await get_client()
 
         await c(functions.photos.UploadProfilePhotoRequest(
